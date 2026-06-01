@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone
 from enum import Enum
+from http import HTTPStatus
 from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -112,13 +113,13 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     else:
         problem = build_problem(
             status_code=exc.status_code,
-            title=status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"),
+            title=HTTPStatus(exc.status_code).phrase,
             detail=str(exc.detail),
             instance=str(request.url.path),
         )
 
     problem.setdefault("status", exc.status_code)
-    problem.setdefault("title", status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"))
+    problem.setdefault("title", HTTPStatus(exc.status_code).phrase)
     problem.setdefault("type", "about:blank")
     problem.setdefault("detail", "Request failed")
     problem.setdefault("instance", str(request.url.path))
@@ -153,7 +154,7 @@ async def validation_exception_handler(
     )
 
 
-def verify_bearer_token(authorization: Optional[str] = Header(default=None)) -> None:
+def verify_bearer_token(authorization: Optional[str] = Header(default=None)) -> bool:
     if not authorization:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -176,6 +177,7 @@ def verify_bearer_token(authorization: Optional[str] = Header(default=None)) -> 
                 problem_type="https://smart-campus.local/problems/unauthorized",
             ),
         )
+    return True
 
 
 def now_iso() -> str:
@@ -200,14 +202,17 @@ def health() -> HealthResponse:
     "/readings",
     response_model=SensorReadingCreated,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(verify_bearer_token)],
     responses={
         401: {"model": ProblemDetails},
         422: {"model": ProblemDetails},
         429: {"model": ProblemDetails},
     },
 )
-def create_reading(payload: SensorReadingCreate, response: Response) -> SensorReadingCreated:
+def create_reading(
+    payload: SensorReadingCreate,
+    response: Response,
+    _: bool = Depends(verify_bearer_token),
+) -> SensorReadingCreated:
     if payload.metric == SensorMetric.temperature and payload.value >= 70:
         response.headers["X-Warning"] = "high-temperature"
 
@@ -234,10 +239,11 @@ def create_reading(payload: SensorReadingCreate, response: Response) -> SensorRe
     )
 
 
-@app.get("/readings/latest", dependencies=[Depends(verify_bearer_token)])
+@app.get("/readings/latest")
 def latest_readings(
     device_id: Optional[str] = Query(default=None),
     limit: int = Query(default=10, ge=1, le=100),
+    _: bool = Depends(verify_bearer_token),
 ) -> Dict[str, List[Dict]]:
     items = READINGS
 
@@ -247,8 +253,8 @@ def latest_readings(
     return {"items": items[-limit:]}
 
 
-@app.get("/readings/{reading_id}", dependencies=[Depends(verify_bearer_token)])
-def get_reading(reading_id: str) -> Dict:
+@app.get("/readings/{reading_id}")
+def get_reading(reading_id: str, _: bool = Depends(verify_bearer_token)) -> Dict:
     for item in READINGS:
         if item["reading_id"] == reading_id:
             return item
