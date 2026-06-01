@@ -34,10 +34,25 @@ jobs:
       - name: Give container time to initialize
         run: sleep 5
 
-      - name: Wait for service health
+      - name: Wait for service health (poll and dump logs on failure)
         run: |
           echo "Waiting for service health (up to 120s)..."
-          npx wait-on http://localhost:8000/health --timeout 120000
+          START=$(date +%s)
+          TIMEOUT=120
+          until curl -sSf http://localhost:8000/health >/dev/null 2>&1; do
+            now=$(date +%s)
+            elapsed=$((now-START))
+            if [ $elapsed -ge $TIMEOUT ]; then
+              echo "Timeout waiting for /health after ${TIMEOUT}s"
+              echo "=== docker ps -a ==="
+              docker ps -a || true
+              echo "=== docker logs fit4110-iot-lab04 ==="
+              docker logs fit4110-iot-lab04 || true
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "/health is UP"
 
       - name: Run Newman against Docker container
         run: npm run test:local
