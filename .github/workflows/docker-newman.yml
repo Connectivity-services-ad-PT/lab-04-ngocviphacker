@@ -31,15 +31,24 @@ jobs:
             --env-file .env.example \
             fit4110/iot-ingestion:lab04
 
+      - name: Give container time to initialize
+        run: sleep 5
+
       - name: Wait for service health
-        run: npx wait-on http://localhost:8000/health --timeout 30000
+        run: |
+          echo "Waiting for service health (up to 120s)..."
+          npx wait-on http://localhost:8000/health --timeout 120000
 
       - name: Run Newman against Docker container
         run: npm run test:local
 
       - name: Show container logs on failure
         if: failure()
-        run: docker logs fit4110-iot-lab04 || true
+        run: |
+          echo "=== docker ps -a ==="
+          docker ps -a || true
+          echo "=== docker logs fit4110-iot-lab04 ==="
+          docker logs fit4110-iot-lab04 || true
 
       - name: Stop container
         if: always()
